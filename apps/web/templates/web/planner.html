@@ -1,0 +1,163 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spotter - Route & Fuel Planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="{% static 'web/css/planner.css' %}" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Route planner controls">
+        <header class="brand">
+          <div class="brand-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" />
+              <path d="M12 22V12" />
+              <path d="M4 7l8 5 8-5" />
+            </svg>
+          </div>
+          <div>
+            <h1>Spotter</h1>
+            <p>Smart US route & fuel planning</p>
+          </div>
+        </header>
+
+        <form id="planner-form" class="planner-form" novalidate>
+          <div class="field">
+            <label for="start-input">
+              <span class="label-dot start-dot"></span>
+              Start location
+            </label>
+            <input
+              id="start-input"
+              name="start"
+              type="text"
+              placeholder="e.g. New York, NY"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="field">
+            <label for="finish-input">
+              <span class="label-dot finish-dot"></span>
+              Finish location
+            </label>
+            <input
+              id="finish-input"
+              name="finish"
+              type="text"
+              placeholder="e.g. Los Angeles, CA"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="presets" role="group" aria-label="Quick route presets">
+            <span class="presets-label">Quick routes</span>
+            <div class="preset-buttons">
+              <button type="button" class="preset-btn" data-start="New York, NY" data-finish="Washington, DC">
+                NYC → DC
+              </button>
+              <button type="button" class="preset-btn" data-start="New York, NY" data-finish="Los Angeles, CA">
+                NYC → LA
+              </button>
+              <button type="button" class="preset-btn" data-start="Chicago, IL" data-finish="Miami, FL">
+                Chicago → Miami
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" class="submit-btn" id="submit-btn">
+            <span class="btn-label">Plan Route</span>
+            <span class="btn-spinner" hidden aria-hidden="true"></span>
+          </button>
+        </form>
+
+        <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+        <section id="results-panel" class="results-panel" hidden>
+          <h2>Trip summary</h2>
+          <div class="stats-grid">
+            <article class="stat-card stat-distance">
+              <span class="stat-label">Distance</span>
+              <strong id="stat-distance">-</strong>
+            </article>
+            <article class="stat-card stat-duration">
+              <span class="stat-label">Duration</span>
+              <strong id="stat-duration">-</strong>
+            </article>
+            <article class="stat-card stat-cost">
+              <span class="stat-label">Fuel cost</span>
+              <strong id="stat-cost">-</strong>
+            </article>
+            <article class="stat-card stat-gallons">
+              <span class="stat-label">Gallons</span>
+              <strong id="stat-gallons">-</strong>
+            </article>
+          </div>
+
+          <div class="vehicle-badge">
+            <span>{{ vehicle_range_miles|floatformat:0 }} mi range</span>
+            <span>{{ vehicle_mpg|floatformat:0 }} MPG</span>
+          </div>
+
+          <div class="fuel-stops-section">
+            <div class="section-header">
+              <h3>Fuel stops</h3>
+              <span id="fuel-stop-count" class="pill">0</span>
+            </div>
+            <ul id="fuel-stop-list" class="fuel-stop-list"></ul>
+            <p id="no-stops-message" class="no-stops-message" hidden>
+              No refueling needed - this trip is within your {{ vehicle_range_miles|floatformat:0 }}-mile range.
+            </p>
+          </div>
+        </section>
+
+        <footer class="sidebar-footer">
+          <a href="/api/v1/health/" target="_blank" rel="noopener">API health</a>
+          <span>·</span>
+          <span>Powered by OSRM + local fuel data</span>
+        </footer>
+      </aside>
+
+      <main class="map-panel">
+        <div id="map" role="application" aria-label="Interactive route map"></div>
+        <div id="map-overlay" class="map-overlay">
+          <div class="overlay-content">
+            <div class="overlay-icon" aria-hidden="true">🗺️</div>
+            <h2>Plan your next road trip</h2>
+            <p>Enter US start and finish locations to see the optimal route and cheapest fuel stops.</p>
+          </div>
+        </div>
+        <div class="map-legend" aria-label="Map legend">
+          <span><i class="legend-dot start"></i> Start</span>
+          <span><i class="legend-dot finish"></i> Finish</span>
+          <span><i class="legend-dot fuel"></i> Fuel stop</span>
+          <span><i class="legend-line"></i> Route</span>
+        </div>
+      </main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="{% static 'web/js/planner.js' %}"></script>
+  </body>
+</html>
