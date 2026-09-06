@@ -40,3 +40,41 @@ def test_out_of_range_coordinate():
     # Latitude 100 degrees at E5 precision, longitude zero.
     with pytest.raises(ValueError, match="out of range"):
         decode_polyline("_gjaR?")
+
+
+@pytest.mark.parametrize('route,point,segment,fraction', [
+    ([Coordinates(30, -100), Coordinates(30, -98)], Coordinates(30, -99), 0, 0.5),
+    ([Coordinates(30, -100), Coordinates(32, -100)], Coordinates(31, -100), 0, 0.5),
+    ([Coordinates(30, -100), Coordinates(30, -100), Coordinates(30, -98)],
+     Coordinates(30, -99), 1, 0.5),
+    ([Coordinates(0, 179), Coordinates(0, -179)], Coordinates(0, 180), 0, 0.5),
+])
+def test_points_between_route_vertices(route, point, segment, fraction):
+    from apps.core.geo import project_to_polyline
+
+    distance, index, ratio = project_to_polyline(point, route)
+    assert distance == pytest.approx(0, abs=1e-8)
+    assert index == segment
+    assert ratio == pytest.approx(fraction)
+
+
+def test_segment_projection_clamps_to_endpoints():
+    from apps.core.geo import haversine_miles, project_to_polyline
+
+    route = [Coordinates(30, -100), Coordinates(30, -98)]
+    point = Coordinates(30, -97)
+    distance, index, fraction = project_to_polyline(point, route)
+    assert index == 0
+    assert fraction == 1
+    assert distance == pytest.approx(haversine_miles(point, route[-1]))
+
+
+def test_projection_handles_empty_and_single_point_routes():
+    from apps.core.geo import haversine_miles, project_to_polyline
+
+    point = Coordinates(30, -99)
+    assert project_to_polyline(point, [point]) == (0, 0, 0)
+    assert project_to_polyline(point, [Coordinates(31, -99)])[0] == pytest.approx(
+        haversine_miles(point, Coordinates(31, -99))
+    )
+    assert project_to_polyline(point, [])[0] == float('inf')
