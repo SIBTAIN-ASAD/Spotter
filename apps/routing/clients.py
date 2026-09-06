@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from abc import ABC, abstractmethod
 
 import httpx
@@ -51,20 +52,42 @@ class OSRMRoutingClient(RoutingClient):
             logger.warning("OSRM request failed", exc_info=exc)
             raise ServiceUnavailableError("Routing service is unavailable.") from exc
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ExternalServiceError("Routing service returned invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise ExternalServiceError("Routing service returned an invalid response.")
         if payload.get("code") != "Ok" or not payload.get("routes"):
             message = payload.get("message", "Unable to calculate route.")
             raise ExternalServiceError(message)
 
-        route = payload["routes"][0]
+        routes = payload["routes"]
+        if not isinstance(routes, list) or not isinstance(routes[0], dict):
+            raise ExternalServiceError("Routing service returned invalid routes.")
+        route = routes[0]
         geometry = route.get("geometry")
         if not geometry:
             raise ExternalServiceError("Routing service returned an empty geometry.")
 
-        polyline = decode_polyline(geometry)
+        if not isinstance(geometry, str):
+            raise ExternalServiceError("Routing service returned an invalid geometry.")
+        try:
+            polyline = decode_polyline(geometry)
+        except (IndexError, ValueError) as exc:
+            raise ExternalServiceError("Routing service returned an invalid geometry.") from exc
         if len(polyline) < 2:
             raise ExternalServiceError("Routing service returned an invalid geometry.")
 
+        for field in ("distance", "duration"):
+            value = route.get(field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ExternalServiceError(f"Routing service returned an invalid {field}.")
         distance_miles = route["distance"] / 1609.344
         duration_seconds = route["duration"]
 
