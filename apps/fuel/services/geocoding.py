@@ -78,6 +78,19 @@ class GeocodingClient(ABC):
         raise NotImplementedError
 
 
+def _parse_coordinates(latitude, longitude) -> Coordinates:
+    """Validate external coordinates before returning or caching them."""
+    try:
+        if isinstance(latitude, bool) or isinstance(longitude, bool):
+            raise ValueError("Boolean coordinate")
+        latitude, longitude = float(latitude), float(longitude)
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise ValueError("Coordinate out of range")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ExternalServiceError("Geocoding service returned invalid coordinates.") from exc
+    return Coordinates(latitude=latitude, longitude=longitude)
+
+
 def parse_us_location(query: str) -> tuple[str, str] | None:
     """Parse 'City, ST' or 'City, State Name' from a US location string."""
     cleaned = query.strip()
@@ -177,12 +190,22 @@ class PhotonGeocodingClient(GeocodingClient):
             logger.warning("Photon geocoding request failed", exc_info=exc)
             raise ServiceUnavailableError("Geocoding service is unavailable.") from exc
 
-        features = response.json().get("features", [])
-        if not features:
-            raise ExternalServiceError(f"Could not geocode location: {query}")
-
-        geometry = features[0]["geometry"]["coordinates"]
-        return Coordinates(latitude=float(geometry[1]), longitude=float(geometry[0]))
+        try:
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+                raise ValueError("Invalid feature collection")
+            features = payload["features"]
+            if not features:
+                raise ExternalServiceError(f"Could not geocode location: {query}")
+            geometry = features[0]["geometry"]
+            if geometry.get("type") != "Point":
+                raise ValueError("Expected Point geometry")
+            coordinates = geometry["coordinates"]
+            if not isinstance(coordinates, list) or len(coordinates) < 2:
+                raise ValueError("Invalid coordinates")
+            return _parse_coordinates(coordinates[1], coordinates[0])
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise ExternalServiceError("Geocoding service returned an invalid response.") from exc
 
     def _request(self, params: dict, headers: dict) -> httpx.Response:
         if self._client:
@@ -232,12 +255,16 @@ class NominatimGeocodingClient(GeocodingClient):
             logger.warning("Nominatim request failed", exc_info=exc)
             raise ServiceUnavailableError("Geocoding service is unavailable.") from exc
 
-        results = response.json()
-        if not results:
-            raise ExternalServiceError(f"Could not geocode location: {query}")
-
-        result = results[0]
-        return Coordinates(latitude=float(result["lat"]), longitude=float(result["lon"]))
+        try:
+            results = response.json()
+            if not isinstance(results, list):
+                raise ValueError("Expected geocoding results")
+            if not results:
+                raise ExternalServiceError(f"Could not geocode location: {query}")
+            result = results[0]
+            return _parse_coordinates(result["lat"], result["lon"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ExternalServiceError("Geocoding service returned an invalid response.") from exc
 
     def _request(self, params: dict, headers: dict) -> httpx.Response:
         if self._client:
