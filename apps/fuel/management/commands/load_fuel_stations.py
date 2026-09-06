@@ -47,17 +47,17 @@ class Command(BaseCommand):
             remote_client=NominatimGeocodingClient() if options["remote_geocode"] else None,
         )
 
-        if options["clear"]:
-            deleted_count, _ = FuelStation.objects.all().delete()
-            self.stdout.write(
-                self.style.WARNING(f"Deleted {deleted_count} existing fuel stations.")
-            )
-
         created = 0
         skipped_no_coords = 0
         coordinate_cache: dict[tuple[str, str], tuple[float, float] | None] = {}
 
         with transaction.atomic():
+            if options["clear"]:
+                deleted_count, _ = FuelStation.objects.all().delete()
+                self.stdout.write(
+                    self.style.WARNING(f"Deleted {deleted_count} existing fuel stations.")
+                )
+
             for row in stations:
                 location_key = (row["city"], row["state"])
                 if location_key not in coordinate_cache:
