@@ -35,3 +35,29 @@ def test_empty_route_has_no_candidates():
     assert FuelStationRepository().get_cheapest_by_location(
         route_polyline=[], cumulative_miles=[], corridor_miles=2,
     ) == []
+
+
+@pytest.mark.django_db
+def test_high_latitude_station_is_not_lost_by_longitude_prefilter():
+    station = FuelStation.objects.create(
+        opis_id='alaska', name='Alaska station', address='Road', city='Town', state='AK',
+        retail_price=Decimal('3'), latitude=65.5, longitude=-149,
+    )
+    route = [Coordinates(65, -150), Coordinates(66, -150)]
+    result = FuelStationRepository().get_cheapest_by_location(
+        route_polyline=route, cumulative_miles=cumulative_distances_miles(route),
+        corridor_miles=40,
+    )
+    assert [candidate.station_id for candidate in result] == [station.pk]
+    assert result[0].distance_from_route_miles < 40
+
+
+@pytest.mark.parametrize('route', [
+    [Coordinates(89.9, 0), Coordinates(89.9, 1)],
+    [Coordinates(0, 179.9), Coordinates(0, -179.9)],
+    [Coordinates(0, 179.9), Coordinates(0, 179.95)],
+])
+def test_polar_and_wrapping_corridors_use_conservative_longitude_bounds(route):
+    min_lat, max_lat, min_lng, max_lng = FuelStationRepository._route_bounding_box(route, 50)
+    assert (min_lng, max_lng) == (-180, 180)
+    assert -90 <= min_lat <= max_lat <= 90
