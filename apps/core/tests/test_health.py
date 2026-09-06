@@ -1,8 +1,10 @@
 """Core app tests."""
 
 import pytest
+from django.core.cache import cache
 from django.urls import reverse
 from rest_framework.test import APIClient
+from rest_framework.throttling import AnonRateThrottle
 
 from apps.core.constants import Coordinates
 from apps.core.geo import cumulative_distances_miles, decode_polyline, haversine_miles
@@ -31,3 +33,22 @@ def test_health_check_returns_ok():
     response = client.get(reverse("health-check"))
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+@pytest.mark.django_db
+def test_health_probes_do_not_consume_route_request_quota(monkeypatch):
+    monkeypatch.setattr(AnonRateThrottle, "THROTTLE_RATES", {"anon": "1/min"})
+    client = APIClient(REMOTE_ADDR="192.0.2.77")
+    key = "throttle_anon_192.0.2.77"
+    cache.delete(key)
+    try:
+        for _ in range(3):
+            assert client.get(reverse("health-check")).status_code == 200
+        # Invalid route input avoids any external requests while exercising
+        # the real route endpoint's throttle and validation path.
+        payload = {"start": "", "finish": "Boston, MA"}
+        assert client.post(reverse("route-plan"), payload, format="json").status_code == 400
+        assert client.post(reverse("route-plan"), payload, format="json").status_code == 429
+        assert client.get(reverse("health-check")).status_code == 200
+    finally:
+        cache.delete(key)
