@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 
 from apps.core.constants import Coordinates
@@ -84,11 +85,25 @@ class FuelStationRepository:
     ) -> tuple[float, float, float, float]:
         latitudes = [point.latitude for point in polyline]
         longitudes = [point.longitude for point in polyline]
-        lat_padding = corridor_miles / 69.0
-        lng_padding = corridor_miles / 55.0
+        angular_radius = corridor_miles / 3958.8
+        lat_padding = math.degrees(angular_radius)
+        furthest_latitude = math.radians(max(abs(value) for value in latitudes))
+        # A spherical cap grows wider in longitude toward the poles. Use the
+        # most extreme route latitude so this database prefilter is conservative.
+        if furthest_latitude + angular_radius >= math.pi / 2:
+            lng_padding = 180.0
+        else:
+            lng_padding = math.degrees(math.asin(
+                min(1.0, math.sin(angular_radius) / math.cos(furthest_latitude))
+            ))
+        min_lng, max_lng = min(longitudes) - lng_padding, max(longitudes) + lng_padding
+        # A single SQL interval cannot express wrapping longitude. Search all
+        # longitudes in that case; the segment distance filter still applies.
+        if min_lng < -180 or max_lng > 180 or max(longitudes) - min(longitudes) > 180:
+            min_lng, max_lng = -180.0, 180.0
         return (
-            min(latitudes) - lat_padding,
-            max(latitudes) + lat_padding,
-            min(longitudes) - lng_padding,
-            max(longitudes) + lng_padding,
+            max(-90.0, min(latitudes) - lat_padding),
+            min(90.0, max(latitudes) + lat_padding),
+            min_lng,
+            max_lng,
         )
