@@ -102,11 +102,35 @@ class Command(BaseCommand):
 
         with csv_path.open(newline="", encoding="utf-8-sig") as handle:
             reader = csv.DictReader(handle)
+            required_columns = {
+                "OPIS Truckstop ID", "Truckstop Name", "Address", "City", "State", "Retail Price",
+            }
+            missing_columns = required_columns - set(reader.fieldnames or [])
+            if missing_columns:
+                raise CommandError(f"Missing CSV columns: {', '.join(sorted(missing_columns))}")
+
             for row in reader:
+                if None in row:
+                    raise CommandError(f"Too many fields on CSV line {reader.line_num}.")
+                missing_values = sorted(
+                    column for column in required_columns
+                    if not (row.get(column) or "").strip()
+                )
+                if missing_values:
+                    raise CommandError(
+                        f"Missing values on CSV line {reader.line_num}: {', '.join(missing_values)}"
+                    )
                 try:
-                    price = Decimal(str(row["Retail Price"]).strip())
-                except (InvalidOperation, KeyError, TypeError) as exc:
-                    raise CommandError(f"Invalid retail price in row: {row}") from exc
+                    price = Decimal(row["Retail Price"].strip())
+                except InvalidOperation as exc:
+                    raise CommandError(
+                        f"Invalid retail price on CSV line {reader.line_num}."
+                    ) from exc
+                if not price.is_finite() or price < 0 or price >= Decimal("10000"):
+                    raise CommandError(
+                        f"Retail price on CSV line {reader.line_num} must be finite, "
+                        "non-negative, and less than 10000."
+                    )
 
                 city = " ".join(row["City"].split())
                 state = row["State"].strip().upper()
@@ -126,7 +150,7 @@ class Command(BaseCommand):
                         "address": dedupe_key[2],
                         "city": city,
                         "state": state,
-                        "rack_id": row.get("Rack ID", "").strip(),
+                        "rack_id": (row.get("Rack ID") or "").strip(),
                         "retail_price": price,
                     }
 
