@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from itertools import pairwise
 
 from apps.core.constants import Coordinates
 
@@ -65,15 +66,43 @@ def cumulative_distances_miles(points: list[Coordinates]) -> list[float]:
     return cumulative
 
 
-def distance_to_polyline_miles(point: Coordinates, polyline: list[Coordinates]) -> float:
-    """Approximate minimum distance from a point to a polyline in miles."""
-    if not polyline:
-        return float("inf")
+def project_to_polyline(
+    point: Coordinates, polyline: list[Coordinates],
+) -> tuple[float, int, float]:
+    """Return approximate distance, segment index, and fraction along that segment.
 
-    min_distance = float("inf")
-    for poly_point in polyline:
-        min_distance = min(min_distance, haversine_miles(point, poly_point))
-    return min_distance
+    Use a local equirectangular projection for each segment, then measure the
+    distance to the projected point with haversine. This is an approximation
+    intended for the short segments of a road route, not transcontinental arcs.
+    """
+    if not polyline:
+        return float("inf"), 0, 0.0
+    best = (haversine_miles(point, polyline[0]), 0, 0.0)
+    for index, (start, finish) in enumerate(pairwise(polyline)):
+        scale = math.cos(math.radians((start.latitude + finish.latitude) / 2))
+        longitude_delta = (finish.longitude - start.longitude + 180) % 360 - 180
+        x = longitude_delta * scale
+        y = finish.latitude - start.latitude
+        point_x = ((point.longitude - start.longitude + 180) % 360 - 180) * scale
+        point_y = point.latitude - start.latitude
+        length_squared = x * x + y * y
+        fraction = (
+            max(0.0, min(1.0, (point_x * x + point_y * y) / length_squared))
+            if length_squared else 0.0
+        )
+        projected = Coordinates(
+            latitude=start.latitude + y * fraction,
+            longitude=(start.longitude + longitude_delta * fraction + 180) % 360 - 180,
+        )
+        distance = haversine_miles(point, projected)
+        if distance < best[0]:
+            best = distance, index, fraction
+    return best
+
+
+def distance_to_polyline_miles(point: Coordinates, polyline: list[Coordinates]) -> float:
+    """Approximate minimum distance to the route segments, in miles."""
+    return project_to_polyline(point, polyline)[0]
 
 
 def sample_polyline(

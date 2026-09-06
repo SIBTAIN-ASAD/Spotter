@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from apps.core.constants import Coordinates
-from apps.core.geo import distance_to_polyline_miles, haversine_miles, sample_polyline
+from apps.core.geo import project_to_polyline, sample_polyline
 from apps.fuel.domain import FuelStopCandidate
 from apps.fuel.models import FuelStation
 
@@ -20,6 +20,8 @@ class FuelStationRepository:
         cumulative_miles: list[float],
         corridor_miles: float,
     ) -> list[FuelStopCandidate]:
+        if not route_polyline:
+            return []
         sampled_polyline, sampled_miles = sample_polyline(route_polyline, cumulative_miles)
         min_lat, max_lat, min_lng, max_lng = self._route_bounding_box(
             sampled_polyline,
@@ -47,11 +49,13 @@ class FuelStationRepository:
         best_by_stop: dict[tuple[str, str, str], FuelStopCandidate] = {}
         for station in queryset.iterator(chunk_size=500):
             coords = Coordinates(latitude=station.latitude, longitude=station.longitude)
-            off_route = distance_to_polyline_miles(coords, sampled_polyline)
+            off_route, segment, fraction = project_to_polyline(coords, sampled_polyline)
             if off_route > corridor_miles:
                 continue
 
-            route_mile = self._project_onto_route(coords, sampled_polyline, sampled_miles)
+            route_mile = sampled_miles[segment]
+            if segment + 1 < len(sampled_miles):
+                route_mile += fraction * (sampled_miles[segment + 1] - sampled_miles[segment])
             dedupe_key = (station.opis_id, station.city.upper(), station.state.upper())
             candidate = FuelStopCandidate(
                 station_id=station.id,
@@ -88,20 +92,3 @@ class FuelStationRepository:
             min(longitudes) - lng_padding,
             max(longitudes) + lng_padding,
         )
-
-    @staticmethod
-    def _project_onto_route(
-        point: Coordinates,
-        polyline: list[Coordinates],
-        cumulative_miles: list[float],
-    ) -> float:
-        best_distance = float("inf")
-        best_mile = 0.0
-
-        for idx, poly_point in enumerate(polyline):
-            segment_distance = haversine_miles(point, poly_point)
-            if segment_distance < best_distance:
-                best_distance = segment_distance
-                best_mile = cumulative_miles[idx]
-
-        return best_mile
