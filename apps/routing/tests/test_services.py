@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from apps.core.constants import Coordinates
+from apps.core.exceptions import BusinessRuleError
 from apps.fuel.domain import FuelStopCandidate
 from apps.fuel.repositories import FuelStationRepository
 from apps.fuel.services.optimizer import FuelOptimizer
@@ -83,3 +84,38 @@ def test_optimizer_prefers_cheaper_station():
     plan = optimizer.plan(total_distance_miles=900, candidates=candidates)
     assert plan.fuel_stops
     assert plan.total_fuel_cost_usd > 0
+
+
+@pytest.mark.parametrize("field", ["start", "finish"])
+@pytest.mark.parametrize("coordinates", [
+    Coordinates(48.8566, 2.3522),
+    Coordinates(float("nan"), -97),
+    Coordinates(30, 181),
+])
+def test_invalid_geocoded_location_is_rejected_before_routing(field, coordinates):
+    geocoder = MagicMock()
+    valid = Coordinates(30.2672, -97.7431)
+    geocoder.geocode.side_effect = (
+        [coordinates] if field == "start" else [valid, coordinates]
+    )
+    routing = MagicMock()
+    planner = RoutePlannerService(
+        geocoding_client=geocoder, routing_client=routing,
+        fuel_repository=MagicMock(), fuel_optimizer=MagicMock(),
+    )
+    with pytest.raises(BusinessRuleError, match=field):
+        planner.plan_route(start="Austin, TX", finish="Destination")
+    routing.get_route.assert_not_called()
+
+
+def test_valid_geocoded_location_preserves_address_label():
+    geocoder = MagicMock()
+    geocoder.geocode.return_value = Coordinates(30.2672, -97.7431)
+    planner = RoutePlannerService(
+        geocoding_client=geocoder, routing_client=MagicMock(),
+        fuel_repository=MagicMock(), fuel_optimizer=MagicMock(),
+    )
+    location = planner._resolve_location("  Austin, TX  ", field_name="start")
+    assert location.coordinates == Coordinates(30.2672, -97.7431)
+    assert location.label == "Austin, TX"
+    geocoder.geocode.assert_called_once_with("Austin, TX, USA")
