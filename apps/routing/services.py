@@ -137,7 +137,14 @@ class RoutePlannerService:
             if not query.lower().endswith("usa") and "united states" not in query.lower():
                 query = f"{query}, USA"
             coordinates = self.geocoding_client.geocode(query)
-            return Location(coordinates=coordinates, label=value.strip())
+            return self._resolve_coordinate_dict(
+                {
+                    "lat": coordinates.latitude,
+                    "lng": coordinates.longitude,
+                    "label": value.strip(),
+                },
+                field_name=field_name,
+            )
 
         if isinstance(value, dict):
             return self._resolve_coordinate_dict(value, field_name=field_name)
