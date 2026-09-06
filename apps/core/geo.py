@@ -25,31 +25,28 @@ def decode_polyline(encoded: str) -> list[Coordinates]:
     lat = 0
     lng = 0
 
+    def read_delta() -> int:
+        nonlocal index
+        result = 0
+        for shift in range(0, 35, 5):
+            if index >= len(encoded):
+                raise ValueError("Truncated encoded coordinate.")
+            value = ord(encoded[index]) - 63
+            index += 1
+            if not 0 <= value <= 63:
+                raise ValueError("Invalid character in encoded polyline.")
+            result |= (value & 0x1F) << shift
+            if value < 0x20:
+                if result > 0xFFFFFFFF:
+                    raise ValueError("Encoded coordinate exceeds 32 bits.")
+                return ~(result >> 1) if result & 1 else result >> 1
+        raise ValueError("Encoded coordinate exceeds 32 bits.")
+
     while index < len(encoded):
-        shift = 0
-        result = 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        delta_lat = ~(result >> 1) if (result & 1) else (result >> 1)
-        lat += delta_lat
-
-        shift = 0
-        result = 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        delta_lng = ~(result >> 1) if (result & 1) else (result >> 1)
-        lng += delta_lng
-
+        lat += read_delta()
+        lng += read_delta()
+        if not (-9000000 <= lat <= 9000000 and -18000000 <= lng <= 18000000):
+            raise ValueError("Decoded coordinate is out of range.")
         coordinates.append(Coordinates(latitude=lat / 1e5, longitude=lng / 1e5))
 
     return coordinates

@@ -43,7 +43,7 @@ def test_invalid_json():
         get_route(httpx.Response(200, text="<html>upstream error</html>"))
 
 
-@pytest.mark.parametrize("geometry", ["", "_", "?", "??", [1, 2]])
+@pytest.mark.parametrize("geometry", ["", "_", "?", "??", "!!!!", "_gjaR?", [1, 2]])
 def test_invalid_geometry(geometry):
     with pytest.raises(ExternalServiceError):
         get_route(httpx.Response(200, json={
