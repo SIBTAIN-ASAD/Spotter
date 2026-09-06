@@ -266,10 +266,11 @@ class CompositeGeocodingClient(GeocodingClient):
         remote_clients: list[GeocodingClient] | None = None,
     ) -> None:
         self.local_client = local_client or LocalGeocodingClient()
-        self.remote_clients = remote_clients or [
-            PhotonGeocodingClient(),
-            NominatimGeocodingClient(),
-        ]
+        self.remote_clients = (
+            [PhotonGeocodingClient(), NominatimGeocodingClient()]
+            if remote_clients is None
+            else remote_clients
+        )
 
     def geocode(self, query: str) -> Coordinates:
         try:
