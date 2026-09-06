@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -35,6 +36,10 @@ class FuelOptimizer:
     """Compute minimum-cost refueling plan along a route."""
 
     def __init__(self, *, vehicle_range_miles: float, vehicle_mpg: float) -> None:
+        if not math.isfinite(vehicle_range_miles) or vehicle_range_miles <= 0:
+            raise BusinessRuleError("Vehicle range must be finite and greater than zero.")
+        if not math.isfinite(vehicle_mpg) or vehicle_mpg <= 0:
+            raise BusinessRuleError("Vehicle MPG must be finite and greater than zero.")
         self.vehicle_range_miles = vehicle_range_miles
         self.vehicle_mpg = vehicle_mpg
 
@@ -44,41 +49,69 @@ class FuelOptimizer:
         total_distance_miles: float,
         candidates: list[FuelStopCandidate],
     ) -> FuelPlan:
-        if total_distance_miles <= 0:
-            raise BusinessRuleError("Route distance must be greater than zero.")
+        if not math.isfinite(total_distance_miles) or total_distance_miles <= 0:
+            raise BusinessRuleError("Route distance must be finite and greater than zero.")
 
+        total_gallons = self._gallons_for_distance(total_distance_miles)
         if total_distance_miles <= self.vehicle_range_miles:
-            gallons = self._gallons_for_distance(total_distance_miles)
-            return FuelPlan(
-                fuel_stops=[],
-                total_fuel_cost_usd=Decimal("0.00"),
-                total_gallons=gallons,
-            )
+            return FuelPlan([], Decimal("0.00"), total_gallons)
 
         nodes = self._build_nodes(total_distance_miles, candidates)
-        if len(nodes) <= 2 and total_distance_miles > self.vehicle_range_miles:
-            raise BusinessRuleError(
-                "No fuel stations found within range of the route corridor."
-            )
+        if len(nodes) <= 2:
+            raise BusinessRuleError("No fuel stations found within range of the route corridor.")
 
-        predecessors, min_costs = self._shortest_cost_path(nodes)
-        destination_index = len(nodes) - 1
-        if min_costs[destination_index] == float("inf"):
-            raise BusinessRuleError(
-                "Unable to reach destination with available fuel stops within vehicle range."
-            )
+        # Track remaining fuel in miles to avoid accumulating MPG conversion error.
+        capacity = Decimal(str(self.vehicle_range_miles))
+        remaining = capacity
+        mpg = Decimal(str(self.vehicle_mpg))
+        miles = [Decimal(str(node["mile"])) for node in nodes]
+        stops = []
+        for index in range(1, len(nodes)):
+            remaining -= miles[index] - miles[index - 1]
+            if remaining < 0:
+                raise BusinessRuleError(
+                    "Unable to reach destination with available fuel stops within vehicle range."
+                )
+            node = nodes[index]
+            if node["type"] == "destination":
+                break
 
-        path = self._reconstruct_path(predecessors, destination_index)
-        fuel_stops = self._build_fuel_stops(nodes, path)
-        total_cost = Decimal(str(min_costs[destination_index])).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-        total_gallons = sum((stop.gallons_purchased for stop in fuel_stops), Decimal("0.00"))
-        total_gallons = total_gallons.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            # Buy only enough to reach the first cheaper station. If no cheaper
+            # station is reachable, fill up (but never beyond the destination).
+            desired = min(capacity, miles[-1] - miles[index])
+            for target in range(index + 1, len(nodes)):
+                distance = miles[target] - miles[index]
+                if distance > capacity:
+                    break
+                if nodes[target]["price"] <= node["price"]:
+                    desired = distance
+                    break
+
+            purchase = max(Decimal("0"), desired - remaining)
+            if purchase == 0:
+                continue
+            remaining += purchase
+            gallons = purchase / mpg
+            candidate = node["candidate"]
+            stops.append(PlannedFuelStop(
+                station_id=candidate.station_id,
+                opis_id=candidate.opis_id,
+                name=candidate.name,
+                address=candidate.address,
+                city=candidate.city,
+                state=candidate.state,
+                retail_price=candidate.retail_price,
+                coordinates=candidate.coordinates,
+                distance_along_route_miles=candidate.distance_along_route_miles,
+                gallons_purchased=gallons.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                fuel_cost_usd=(gallons * candidate.retail_price).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP,
+                ),
+            ))
 
         return FuelPlan(
-            fuel_stops=fuel_stops,
-            total_fuel_cost_usd=total_cost,
+            fuel_stops=stops,
+            total_fuel_cost_usd=sum((stop.fuel_cost_usd for stop in stops), Decimal("0.00")),
             total_gallons=total_gallons,
         )
 
@@ -89,6 +122,12 @@ class FuelOptimizer:
     ) -> list[dict]:
         deduped: dict[tuple[str, str, str], FuelStopCandidate] = {}
         for candidate in candidates:
+            if (
+                not math.isfinite(candidate.distance_along_route_miles)
+                or not candidate.retail_price.is_finite()
+                or candidate.retail_price < 0
+            ):
+                raise BusinessRuleError("Fuel station distance and price must be valid and finite.")
             key = (candidate.opis_id, candidate.city.upper(), candidate.state.upper())
             existing = deduped.get(key)
             if existing is None or candidate.retail_price < existing.retail_price:
@@ -127,74 +166,6 @@ class FuelOptimizer:
             }
         )
         return nodes
-
-    def _shortest_cost_path(self, nodes: list[dict]) -> tuple[list[int | None], list[float]]:
-        size = len(nodes)
-        min_costs = [float("inf")] * size
-        predecessors: list[int | None] = [None] * size
-        min_costs[0] = 0.0
-
-        for target in range(1, size):
-            for source in range(target):
-                distance = nodes[target]["mile"] - nodes[source]["mile"]
-                if distance > self.vehicle_range_miles:
-                    continue
-
-                gallons = float(self._gallons_for_distance(distance))
-                segment_cost = 0.0 if source == 0 else float(nodes[source]["price"]) * gallons
-                candidate_cost = min_costs[source] + segment_cost
-                if candidate_cost < min_costs[target]:
-                    min_costs[target] = candidate_cost
-                    predecessors[target] = source
-
-        return predecessors, min_costs
-
-    @staticmethod
-    def _reconstruct_path(predecessors: list[int | None], destination_index: int) -> list[int]:
-        path: list[int] = []
-        current: int | None = destination_index
-        while current is not None:
-            path.append(current)
-            current = predecessors[current]
-        path.reverse()
-        return path
-
-    def _build_fuel_stops(self, nodes: list[dict], path: list[int]) -> list[PlannedFuelStop]:
-        fuel_stops: list[PlannedFuelStop] = []
-
-        for idx in range(len(path) - 1):
-            source_index = path[idx]
-            target_index = path[idx + 1]
-            source = nodes[source_index]
-            target = nodes[target_index]
-
-            if source["type"] != "station":
-                continue
-
-            distance = target["mile"] - source["mile"]
-            gallons = self._gallons_for_distance(distance)
-            fuel_cost = (source["price"] * gallons).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            candidate: FuelStopCandidate = source["candidate"]
-
-            fuel_stops.append(
-                PlannedFuelStop(
-                    station_id=candidate.station_id,
-                    opis_id=candidate.opis_id,
-                    name=candidate.name,
-                    address=candidate.address,
-                    city=candidate.city,
-                    state=candidate.state,
-                    retail_price=candidate.retail_price,
-                    coordinates=candidate.coordinates,
-                    distance_along_route_miles=candidate.distance_along_route_miles,
-                    gallons_purchased=gallons,
-                    fuel_cost_usd=fuel_cost,
-                )
-            )
-
-        return fuel_stops
 
     def _gallons_for_distance(self, distance_miles: float) -> Decimal:
         gallons = Decimal(str(distance_miles)) / Decimal(str(self.vehicle_mpg))

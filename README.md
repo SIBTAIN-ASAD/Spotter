@@ -41,14 +41,14 @@ RoutePlannerService (orchestration)
 ├── GeocodingClient (Nominatim)          - start/finish only
 ├── RoutingClient (OSRM)                   - one call per request
 ├── FuelStationRepository                  - local DB lookup
-└── FuelOptimizer                          - min-cost refueling DP
+└── FuelOptimizer                          - minimum-cost refueling
 ```
 
 **Key design choices**
 
 1. **External API minimization**: If clients send coordinates, the API makes exactly **one** external call (OSRM). Address inputs require up to **two** Nominatim calls plus one OSRM call.
 2. **Fuel prices are local**: The assessment CSV is loaded into SQLite with coordinates resolved offline from GeoNames, avoiding runtime geocoding for ~6,800 stations.
-3. **Fuel optimization**: Stations along the route corridor are projected onto the route, then a dynamic-programming algorithm finds the minimum-cost refueling plan under the 500-mile range constraint.
+3. **Fuel optimization**: Stations along the route corridor are projected onto the route, then a fuel-aware greedy algorithm buys enough to reach a cheaper station, or fills the tank when no cheaper station is reachable. Fuel remaining from the initial tank and earlier purchases is carried forward.
 4. **Dependency injection**: Clients and repositories are injectable for testing.
 
 ## Folder Structure
@@ -242,7 +242,7 @@ Common status codes:
 |---|---|
 | OSRM for routing | Free, fast, widely used, single-call route + geometry |
 | Offline fuel geocoding | Avoids thousands of runtime geocoding calls and rate limits |
-| Dynamic programming optimizer | Finds minimum fuel cost under range constraints |
+| Fuel-aware greedy optimizer | Carries remaining fuel between stops and minimizes purchases under range constraints |
 | SQLite | Zero-config for assessment reviewers |
 | GeoJSON map payload | Directly usable by map clients (Leaflet, Mapbox GL, etc.) |
 
@@ -257,7 +257,7 @@ Common status codes:
 ## Trade-offs
 
 - City-level geocoding is less precise than street-level geocoding, but is reliable and fast for corridor matching.
-- The optimizer assumes fuel is purchased only at selected stops along the optimal path.
+- The optimizer carries fuel between stops, never exceeds tank capacity, and counts only new purchases toward fuel spend. Per-stop costs are rounded to cents and summed; total gallons represents fuel consumed over the whole route.
 - Public OSRM/Nominatim endpoints are suitable for assessment/demo usage; production would use self-hosted or paid providers.
 
 ## Known Limitations
