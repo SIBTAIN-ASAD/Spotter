@@ -35,7 +35,9 @@ class RoutePlanRequestSerializer(serializers.Serializer):
                 continue
             if isinstance(value, dict):
                 nested = CoordinateInputSerializer(data=value)
-                nested.is_valid(raise_exception=True)
+                if not nested.is_valid():
+                    raise serializers.ValidationError({field_name: nested.errors})
+                attrs[field_name] = nested.validated_data
                 continue
             raise serializers.ValidationError(
                 {field_name: "Must be a US address string or coordinate object."}
