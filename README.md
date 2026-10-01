@@ -1,6 +1,10 @@
 # Spotter - US Route & Fuel Planning API
 
+[![CI](https://github.com/SIBTAIN-ASAD/Spotter/actions/workflows/ci.yml/badge.svg)](https://github.com/SIBTAIN-ASAD/Spotter/actions/workflows/ci.yml)
+
 Production-quality Django API that plans a driving route between two US locations, returns map geometry, and recommends cost-optimal fuel stops along the route based on the provided fuel price dataset.
+
+Spotter is useful as a reference implementation for route-aware optimization, GeoJSON API responses, and isolating external geocoding and routing providers behind testable service boundaries.
 
 ## Features
 
@@ -81,7 +85,7 @@ Spotter/
 ### Quick start
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/SIBTAIN-ASAD/Spotter.git
 cd Spotter
 make setup
 make dev
