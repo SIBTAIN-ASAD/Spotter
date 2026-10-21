@@ -53,6 +53,25 @@ def test_route_planner_with_stubbed_clients(fuel_stations):
     assert len(result.map_geojson["features"]) >= 3
 
 
+def test_station_mile_markers_use_osrm_road_distance():
+    repository = MagicMock()
+    repository.get_cheapest_by_location.return_value = []
+    planner = RoutePlannerService(
+        geocoding_client=MagicMock(),
+        routing_client=StubRoutingClient(),
+        fuel_repository=repository,
+        fuel_optimizer=FuelOptimizer(vehicle_range_miles=500, vehicle_mpg=10),
+    )
+
+    planner.plan_route(
+        start={"lat": 40.7128, "lng": -74.0060},
+        finish={"lat": 38.9072, "lng": -77.0369},
+    )
+
+    route_miles = repository.get_cheapest_by_location.call_args.kwargs["cumulative_miles"]
+    assert route_miles[-1] == pytest.approx(225.0)
+
+
 def test_optimizer_prefers_cheaper_station():
     optimizer = FuelOptimizer(vehicle_range_miles=500, vehicle_mpg=10)
     candidates = [

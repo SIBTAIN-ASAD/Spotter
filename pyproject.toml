@@ -2,7 +2,7 @@
 name = "spotter"
 version = "1.0.0"
 description = "US route planning API with cost-optimal fuel stops"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
@@ -11,7 +11,7 @@ addopts = "-ra --strict-markers --cov=apps --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

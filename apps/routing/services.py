@@ -64,6 +64,11 @@ class RoutePlannerService:
         polyline = route["polyline"]
         cumulative_miles = cumulative_distances_miles(polyline)
         total_distance = route["distance_miles"]
+        # OSRM's road distance is authoritative for fuel range. Scale the
+        # decoded geometry's cumulative distances to the same mile markers.
+        if cumulative_miles and cumulative_miles[-1] > 0:
+            scale = total_distance / cumulative_miles[-1]
+            cumulative_miles = [mile * scale for mile in cumulative_miles]
 
         candidates = self.fuel_repository.get_cheapest_by_location(
             route_polyline=polyline,

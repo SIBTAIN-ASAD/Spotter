@@ -13,7 +13,7 @@ Spotter is useful as a reference implementation for route-aware optimization, Ge
 - Recommend cost-optimal fuel stops for a vehicle with a **500-mile range** and **10 MPG**
 - Calculate **total fuel spend** at recommended stops
 - Fast responses with **one routing API call** per request (plus optional geocoding when addresses are supplied)
-- Cross-country route planning completes in ~1-2 seconds locally after fuel data is loaded
+- Route planning makes one OSRM call for coordinate inputs; response time also depends on the public routing service
 - Consistent error handling, request IDs, health checks, throttling, and automated tests
 - **Interactive web UI** with live map, route visualization, and fuel stop details
 
@@ -21,11 +21,11 @@ Spotter is useful as a reference implementation for route-aware optimization, Ge
 
 | Layer | Choice |
 |---|---|
-| Framework | Django 5.2 (latest stable) |
+| Framework | Django 6.1.2 (current stable series) |
 | API | Django REST Framework |
 | Database | SQLite (development / assessment) |
 | Routing | [OSRM](https://project-osrm.org/) public API |
-| Geocoding | OpenStreetMap Nominatim (runtime, for addresses) |
+| Geocoding | Local US city cache, then Photon/Nominatim for addresses |
 | Fuel station geocoding | Offline GeoNames seed (`data/geocode_seed.json`) |
 | HTTP client | httpx |
 | Tests | pytest, pytest-django |
@@ -42,7 +42,7 @@ API View (apps/routing/views.py)
     ↓
 RoutePlannerService (orchestration)
     ↓
-├── GeocodingClient (Nominatim)          - start/finish only
+├── GeocodingClient (local/Photon/Nominatim) - start/finish only
 ├── RoutingClient (OSRM)                   - one call per request
 ├── FuelStationRepository                  - local DB lookup
 └── FuelOptimizer                          - minimum-cost refueling
@@ -50,10 +50,12 @@ RoutePlannerService (orchestration)
 
 **Key design choices**
 
-1. **External API minimization**: If clients send coordinates, the API makes exactly **one** external call (OSRM). Address inputs require up to **two** Nominatim calls plus one OSRM call.
+1. **External API minimization**: If clients send coordinates, the API makes exactly **one** external call (OSRM). Cached US city/state inputs need no external geocoding; other addresses may require Photon or Nominatim calls before the one OSRM call.
 2. **Fuel prices are local**: The assessment CSV is loaded into SQLite with coordinates resolved offline from GeoNames, avoiding runtime geocoding for ~6,800 stations.
 3. **Fuel optimization**: Stations along the route corridor are projected onto the route, then a fuel-aware greedy algorithm buys enough to reach a cheaper station, or fills the tank when no cheaper station is reachable. Fuel remaining from the initial tank and earlier purchases is carried forward.
 4. **Dependency injection**: Clients and repositories are injectable for testing.
+
+**Cost and location assumptions:** The initial tank is full and already paid for, so `total_fuel_cost_usd` counts refills during the trip; `total_gallons_consumed` covers the full route. The supplied CSV has no station coordinates. The offline seed uses locality-level locations, so stops and detours are approximate rather than turn-by-turn station entrances. Public OSRM, Photon, and Nominatim services are rate-limited and do not provide a production SLA.
 
 ## Folder Structure
 
@@ -79,7 +81,7 @@ Spotter/
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Make (optional, recommended)
 
 ### Quick start
